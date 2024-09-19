@@ -1,0 +1,19 @@
+{
+    "Add attachments": "Bijlage(n) toevoegen",
+    "Email with the authentication link has been sent to <strong>:email<\/strong>": "Er is een e-mail verzonden naar  <strong>:email<\/strong> met een authenticatielink",
+    "Error occured sending email to <strong>:email<\/strong>": "Er is een fout opgetreden bij het verzenden van een e-mail naar <strong>:email<\/strong>",
+    "Error occured uploading file": "Er is een fout opgetreden bij het uploaden van het bestand",
+    "Invalid Email Address": "Ongeldig e-mailadres",
+    "Invalid authentication link": "Ongeldige authenticatielink",
+    "Last Activity": "Laatste activiteit",
+    "Log In": "Inloggen",
+    "My Tickets": "Mijn berichten",
+    "Submit a Ticket": "Bericht versturen",
+    "Submit another message": "Nog een bericht versturen",
+    "There are no tickets yet": "Er zijn nog geen berichten",
+    "There is no tickets belonging to the specified email address.": "Er is geen bericht dat bij dit e-mailadres hoort",
+    "Ticket": "Bericht",
+    "Tickets": "Berichten",
+    "Your Name": "Jouw naam",
+    "Your message has been sent!": "Jouw bericht is verzonden!"
+}
