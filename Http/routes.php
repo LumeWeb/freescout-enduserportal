@@ -21,6 +21,10 @@ Route::group(['middleware' => [\App\Http\Middleware\EncryptCookies::class, \Illu
     Route::get('/help/{mailbox_id}', 'EndUserPortalController@submit')->name('enduserportal.submit');
     Route::post('/help/{mailbox_id}', 'EndUserPortalController@submitProcess');
     Route::get('/help/{mailbox_id}/ajax-html/{action}', 'EndUserPortalController@ajaxHtml')->name('enduserportal.ajax_html');
+
+    // OAuth
+    Route::get('/help/{mailbox_id}/oauth', 'EndUserPortalController@oauth')->name('enduserportal.oauth');
+    Route::get('/help/{mailbox_id}/oauth/callback', 'EndUserPortalController@oauthCallback')->name('enduserportal.oauth.callback');
 });
 
 

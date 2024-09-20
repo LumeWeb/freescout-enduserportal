@@ -23,7 +23,7 @@ class EndUserPortalController extends Controller
     public function settings($mailbox_id)
     {
         $mailbox = Mailbox::findOrFail($mailbox_id);
-        
+
         $meta_settings = $mailbox->meta['eup'] ?? [];
 
         $default_settings = \EndUserPortal::getDefaultPortalSettings();
@@ -69,7 +69,7 @@ class EndUserPortalController extends Controller
     public function settingsSave(Request $request, $mailbox_id)
     {
         $mailbox = Mailbox::findOrFail($mailbox_id);
-        
+
         if (!empty($request->eup_action) && $request->eup_action == 'save_settings') {
             $settings = $request->settings;
             if ($settings['text_submit'] == \EndUserPortal::getDefaultPortalSettings('text_submit')) {
@@ -90,7 +90,7 @@ class EndUserPortalController extends Controller
             if (array_key_exists('locale', $settings) && !$settings['locale']) {
                 unset($settings['locale']);
             }
-            
+
             // if (empty($settings['title'])) {
             //     $settings['title'] = __('Contact us');
             // }
@@ -249,6 +249,116 @@ class EndUserPortalController extends Controller
         ]);
     }
 
+    public function oauth( Request $request, $mailbox_id ) {
+        $mailbox = $this->processMailboxId( $mailbox_id );
+
+        if ( ! $mailbox ) {
+            abort( 404 );
+        }
+
+        $oauthEndpoints = \EndUserPortal::getOauthEndpoints();
+        if ( ! $oauthEndpoints || empty( $oauthEndpoints['authorize_url'] ) ) {
+            return response()->json( [ 'error' => 'SSO is not properly configured' ], 500 );
+        }
+
+        // Generate and store a state parameter to prevent CSRF
+        $state = \Str::random( 40 );
+        $request->session()->put( 'oauth_state', $state );
+
+        // Prepare the authorization URL
+        $authorizationUrl = $oauthEndpoints['authorize_url'];
+        $queryParams      = http_build_query( [
+            'client_id'     => \EndUserPortal::getPluginOption( 'portal_client_id' ),
+            'redirect_uri'  => route( 'enduserportal.oauth.callback', [ 'mailbox_id' => $mailbox_id ] ),
+            'response_type' => 'code',
+            'scope'         => 'openid profile email', // Adjust scopes as needed
+            'state'         => $state,
+        ] );
+
+        // Redirect the user to the authorization URL
+        return redirect( $authorizationUrl . '?' . $queryParams );
+    }
+
+    public function oauthCallback( Request $request, $mailbox_id ) {
+        $mailbox = $this->processMailboxId( $mailbox_id );
+
+        if ( ! $mailbox ) {
+            abort( 404 );
+        }
+
+        // Verify the state parameter to prevent CSRF
+        if ( $request->state !== $request->session()->pull( 'oauth_state' ) ) {
+            return response()->json( [ 'error' => 'Invalid state parameter' ], 400 );
+        }
+
+        $oauthEndpoints = \EndUserPortal::getOauthEndpoints();
+        if ( ! $oauthEndpoints || empty( $oauthEndpoints['token_url'] ) ) {
+            return response()->json( [ 'error' => 'SSO is not properly configured' ], 500 );
+        }
+
+        $client = new \GuzzleHttp\Client();
+
+        try {
+            // Prepare Basic Auth credentials
+            $clientId     = \EndUserPortal::getPluginOption( 'portal_client_id' );
+            $clientSecret = \EndUserPortal::getPluginOption( 'portal_client_secret' );
+            $credentials  = base64_encode( $clientId . ':' . $clientSecret );
+
+            // Exchange the authorization code for an access token
+            $response  = $client->post( $oauthEndpoints['token_url'], [
+                'headers'     => [
+                    'Authorization' => 'Basic ' . $credentials,
+                    'Content-Type'  => 'application/x-www-form-urlencoded',
+                ],
+                'form_params' => [
+                    'grant_type'   => 'authorization_code',
+                    'code'         => $request->code,
+                    'redirect_uri' => route( 'enduserportal.oauth.callback', [ 'mailbox_id' => $mailbox_id ] ),
+                ],
+            ] );
+            $tokenData = json_decode( $response->getBody(), true );
+
+            // Use the access token to fetch user information
+            $userInfoResponse = $client->get( $oauthEndpoints['userinfo_url'], [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $tokenData['access_token'],
+                ],
+            ] );
+
+            $userData = json_decode( $userInfoResponse->getBody(), true );
+
+            // Validate the user data
+            if ( ! $this->validateOauthData( $userData ) ) {
+                return response()->json( [ 'error' => 'Invalid user data' ], 400 );
+            }
+
+            // Create or update the customer
+            $customer = Customer::create( $userData['email'], [
+                    'first_name' => $userData['given_name'] ?? '',
+                    'last_name'  => $userData['family_name'] ?? '',
+                ]
+            );
+
+            // Authenticate the customer
+            $hash   = \EndUserPortal::customerHash( $customer->created_at );
+            $cookie = cookie( 'enduserportal_auth', encrypt( $customer->id . '|' . $hash ), \EndUserPortal::AUTH_PERIOD );
+
+            return redirect()->route( 'enduserportal.tickets', [ 'mailbox_id' => \EndUserPortal::encodeMailboxId( $mailbox->id ) ] )
+                ->withCookie( $cookie );
+
+        } catch ( \Exception $e ) {
+            \Log::error( 'SSO error: ' . $e->getMessage() );
+
+            return response()->json( [ 'error' => 'An error occurred during authentication' ], 500 );
+        }
+    }
+
+    private function validateOauthData( $oauthData ) {
+        // Implement your own validation logic here
+        // For example, check if required fields are present and valid
+        return ! empty( $oauthData['email'] ) && filter_var( $oauthData['email'], FILTER_VALIDATE_EMAIL );
+    }
+
     /**
      * Logout.
      */
@@ -302,9 +412,9 @@ class EndUserPortalController extends Controller
                 ->whereIn('type', [Thread::TYPE_MESSAGE, Thread::TYPE_CUSTOMER])
                 ->where('state', Thread::STATE_PUBLISHED)
                 ->get();
-            
+
             $threads = $threads->sortByDesc('id');
-            
+
             $send_later_active = \Module::isActive('sendlater');
 
             if ($threads) {
@@ -314,13 +424,13 @@ class EndUserPortalController extends Controller
                         if ($ticket->id == $thread->conversation_id) {
 
                             // Skip scheduled.
-                            if ($send_later_active 
+                            if ($send_later_active
                                 && $ticket->scheduled
                                 && $thread->getMeta(\SendLater::META_NAME) !== null
                             ) {
                                 continue;
                             }
-                            
+
                             // Update preview as preview in DB contains previews of notes too.
                             $tickets[$i]->preview = \Helper::textPreview($thread->body, Conversation::PREVIEW_MAXLENGTH);
 
@@ -376,7 +486,7 @@ class EndUserPortalController extends Controller
 
         foreach ($threads as $i => $thread) {
             // Skip scheduled.
-            if ($send_later_active 
+            if ($send_later_active
                 && $conversation->scheduled
                 && $thread->getMeta(\SendLater::META_NAME) !== null
             ) {
@@ -772,7 +882,7 @@ class EndUserPortalController extends Controller
      * Widget form.
      */
     public function widgetForm(Request $request, $mailbox_id = null)
-    {        
+    {
         // Set locale if needed.
         if (!empty($request->locale)) {
             app()->setLocale($request->locale);
@@ -843,11 +953,11 @@ class EndUserPortalController extends Controller
     public function ajaxHtml(Request $request)
     {
         //$user = auth()->user();
-        
+
         switch ($request->action) {
 
             case 'privacy_policy':
- 
+
                 $mailbox = $this->processMailboxId($request->mailbox_id, \EndUserPortal::WIDGET_SALT);
 
                 if (!$mailbox) {
@@ -855,7 +965,7 @@ class EndUserPortalController extends Controller
                 }
 
                 $html = \EndUserPortal::getMailboxParam($mailbox, 'privacy');
-                
+
                 return $html;
                 break;
         }

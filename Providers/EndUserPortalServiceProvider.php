@@ -80,6 +80,60 @@ class EndUserPortalServiceProvider extends ServiceProvider
 
             return $menu;
         });
+
+        // Define OAuth settings
+        // Add Portal OAuth section to settings
+        \Eventy::addFilter( 'settings.sections', function ( $sections ) {
+            $sections['portal_oauth'] = [
+                'title' => __( 'Portal OAuth' ),
+                'icon'  => 'lock',
+                'order' => 400,
+            ];
+
+            return $sections;
+        } );
+
+        // Define Portal OAuth settings
+        \Eventy::addFilter( 'settings.section_settings', function ( $settings, $section ) {
+            if ( $section === 'portal_oauth' ) {
+                $settings = [
+                    self::getPluginOptionName( 'portal_oauth_enabled' ) => self::getPluginOption( 'portal_oauth_enabled' ),
+                    self::getPluginOptionName( 'portal_server_url' )    => self::getPluginOption( 'portal_server_url' ),
+                    self::getPluginOptionName( 'portal_client_id' )     => self::getPluginOption( 'portal_client_id' ),
+                    self::getPluginOptionName( 'portal_client_secret' ) => self::getPluginOption( 'portal_client_secret' ),
+                ];
+            }
+
+            return $settings;
+        }, 20, 2 );
+        // Add Portal OAuth parameters
+        \Eventy::addFilter( 'settings.section_params', function ( $params, $section ) {
+            if ( $section === 'portal_oauth' ) {
+                $params = [
+                    'settings'        => [
+                        'portal_oauth_enabled' => [
+
+                        ],
+                        'portal_server_url'    => [
+
+                        ],
+                        'portal_client_id'     => [
+
+                        ],
+                        'portal_client_secret' => [
+
+                        ],
+                    ],
+                    'validator_rules' => [
+                        'settings.portal_server_url'    => 'required_if:settings.portal_oauth_enabled,1|url',
+                        'settings.portal_client_id'     => 'required_if:settings.portal_oauth_enabled,1',
+                        'settings.portal_client_secret' => 'required_if:settings.portal_oauth_enabled,1',
+                    ],
+                ];
+            }
+
+            return $params;
+        }, 20, 2 );
     }
 
     /**
@@ -123,7 +177,7 @@ class EndUserPortalServiceProvider extends ServiceProvider
     public static function getMailboxParam($mailbox, $param)
     {
         return $mailbox->meta['eup'][$param] ?? \EndUserPortal::getDefaultPortalSettings()[$param] ?? '';
-    }    
+    }
 
     public static function isEup()
     {
@@ -138,7 +192,7 @@ class EndUserPortalServiceProvider extends ServiceProvider
     public static function saveWidgetSettings($mailbox_id, $settings)
     {
         return \Option::set(EUP_MODULE.'.widget_settings_'.$mailbox_id, $settings);
-    }    
+    }
 
     // public static function saveWidgetScript($mailbox_id, $settings)
     // {
@@ -164,7 +218,7 @@ class EndUserPortalServiceProvider extends ServiceProvider
     // {
     //     return 'eup_widget_'.self::encodeMailboxId($mailbox_id, self::WIDGET_SALT).'.js';
     // }
-    
+
     public static function getWidgetScriptUrl($mailbox_id, $include_version = false)
     {
         $url = config('app.url').\Module::getPublicPath(EUP_MODULE).'/js/widget.js';
@@ -328,7 +382,7 @@ class EndUserPortalServiceProvider extends ServiceProvider
 
     public static function getStatusName($conversation)
     {
-        if (in_array($conversation->status, [Conversation::STATUS_ACTIVE, Conversation::STATUS_PENDING]) && 
+        if (in_array($conversation->status, [Conversation::STATUS_ACTIVE, Conversation::STATUS_PENDING]) &&
             $conversation->state != Conversation::STATE_DELETED
         ) {
             return __('Open');
@@ -431,5 +485,49 @@ class EndUserPortalServiceProvider extends ServiceProvider
     public function provides()
     {
         return [];
+    }
+
+    public static function getPluginOption( $key ) {
+        return \Option::get( EUP_MODULE . '.' . $key );
+    }
+
+    public static function getPluginOptionName( $key ) {
+        return EUP_MODULE . '.' . $key;
+    }
+
+    public static function getOauthEndpoints() {
+        $serverUrl = self::getPluginOption( 'portal_server_url' );
+        if ( ! $serverUrl ) {
+            return null;
+        }
+
+        // Fetch custom API info from the server
+        $client = new \GuzzleHttp\Client();
+        try {
+            $response = $client->get( $serverUrl . '/api/meta' );
+            $data     = json_decode( $response->getBody(), true );
+        } catch ( Exception $e ) {
+            Log::error( 'Failed to fetch custom API info: ' . $e->getMessage() );
+
+            return null;
+        }
+
+        // Parse the data
+        if (!isset($data['plugins']['dashboard']['meta']['subdomain']) || !is_string($data['plugins']['dashboard']['meta']['subdomain'])) {
+            Log::error('Invalid or missing subdomain in API response');
+            return null;
+        }
+
+        $subdomain = $data['plugins']['dashboard']['meta']['subdomain'];
+        $domain = parse_url($serverUrl, PHP_URL_HOST);
+
+        // Construct the OAuth endpoints
+        $endpoints = [
+            'authorize_url' => "https://{$subdomain}.{$domain}/api/account/support/oauth/authorize",
+            'token_url'     => "https://{$subdomain}.{$domain}/api/account/support/oauth/token",
+            'userinfo_url'  => "https://{$subdomain}.{$domain}/api/account/support/oauth/userinfo",
+        ];
+
+        return $endpoints;
     }
 }
