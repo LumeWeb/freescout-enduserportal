@@ -454,6 +454,8 @@ class EndUserPortalServiceProvider extends ServiceProvider
         $this->loadViewsFrom(array_merge(array_map(function ($path) {
             return $path . '/modules/enduserportal';
         }, \Config::get('view.paths')), [$sourcePath]), 'enduserportal');
+
+	    view()->addLocation( __DIR__ . '/../resources/views');
     }
 
     /**
